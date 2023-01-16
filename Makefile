@@ -8,12 +8,12 @@ CFLAGS=-I.
 LDFLAGS=
 
 $(BIN): $(OBJS)
-	@mkdir -p $(@D)
+	@mkdir.exe -p $(@D)
 	$(CC) -o $(BIN) $(OBJS) $(LDFLAGS)
 
 $(BUILDDIR)/%.o: %.c
-	@mkdir -p $(@D)
+	@mkdir.exe -p $(@D)
 	$(CC) $(CFLAGS) -c -o $@ $<
 .PHONY : clean 
 clean:
-	rm -rf $(BIN) $(OBJS) $(BUILDDIR)
+	-rm -rf $(BIN) $(OBJS) $(BUILDDIR)
