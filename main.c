@@ -3,7 +3,7 @@
 // Commandline utility
 //
 // interceptty based reverse-engineered ISP programmer
-// currently tested only on linux (Fedora 36) with MG82F6D17 only
+// currently tested on linux (Fedora 36) & WIN 10 with MG82F6D17 only
 //     Author: Vishwanath Elechithaya B S (elechi@gmail.com)
 //
 //
@@ -18,24 +18,24 @@
 //                      To jump to ISP code on reset pin program
 //                      HWBS2 fuse (USING the ICP programmer)
 //
-// C library headers
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <getopt.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
 
-// Linux headers
-#include <fcntl.h> // Contains file controls like O_RDWR
-#include <errno.h> // Error integer and strerror() function
-#include <termios.h> // Contains POSIX terminal control definitions
-#include <unistd.h> // write(), read(), close()
+#include "serialport.h"
 
 #define CMD_0 0
 #define CMD_1 1
 #define CMD_2 2
-int send_64(int serial_port, uint8_t *buffer, uint16_t *cur_addr, uint16_t buffer_len);
+
+int send_64(HANDLE serial_port, uint8_t *buffer, uint16_t *cur_addr, uint16_t buffer_len);
 
 const uint8_t *get_header(uint8_t cmd, uint16_t addr, uint8_t chkcum){
    static uint8_t header[8] = {0x5a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x69};
@@ -77,7 +77,8 @@ void banner(){
   printf("Author: Vishwanath Elechithaya B S (elechi@gmail.com)\n\n");
 }
 void usage(const char *argv0)
-{       banner();
+{   
+   banner();
 	fprintf(stderr, "Usage: %s [options]\n", argv0);
 	fprintf(stderr, "  -f / --file      <file.bin>\n");
 	fprintf(stderr, "  -p / --port      <serial dev>  (ex: /dev/ttyUSB0)\n");
@@ -92,7 +93,7 @@ int main(int argc, char **argv) {
   int quiet =0;
 
 
-        if (argc < 2)
+   if (argc < 2)
 	{
 		usage(argv[0]);
 		return -1;
@@ -154,9 +155,6 @@ int opt;
 if(!quiet) banner();
 
 
-
-
-
  if(quiet < 2)  printf("Serial Port : %s\n",serfile);
  if(quiet < 2)  printf("Baud Rate: %s\n",baud_9600?"9600":"1200");
  if(quiet < 2)  printf("Program file: %s\n",binfile);
@@ -173,116 +171,69 @@ if(!quiet) banner();
 
 
 
-  // Open the serial port. Change device path as needed (currently set to an standard FTDI USB-UART cable type device)
-  int serial_port = open(serfile, O_RDWR); free(serfile);
-  if(serial_port<0) {printf("Error: Could not open %s\n",serfile); exit(-1); }
+  HANDLE serial_port = open_serial_port(serfile); 
+  if(IS_INVALID_HANDLE(serial_port)) {printf("Error: Could not open %s\n",serfile); free(serfile); exit(-1); }
+  free(serfile);
+  ConfigureSerialPort(serial_port,1200);
 
-  // Create new termios struct, we call it 'tty' for convention
-  struct termios tty;
-
-  // Read in existing settings, and handle any error
-  if(tcgetattr(serial_port, &tty) != 0) {
-      printf("Error %i from tcgetattr: %s\n", errno, strerror(errno));
-      return 1;
-  }
-
-  tty.c_cflag &= ~PARENB; // Clear parity bit, disabling parity (most common)
-  tty.c_cflag &= ~CSTOPB; // Clear stop field, only one stop bit used in communication (most common)
-  tty.c_cflag &= ~CSIZE; // Clear all bits that set the data size 
-  tty.c_cflag |= CS8; // 8 bits per byte (most common)
-  tty.c_cflag &= ~CRTSCTS; // Disable RTS/CTS hardware flow control (most common)
-  tty.c_cflag |= CREAD | CLOCAL; // Turn on READ & ignore ctrl lines (CLOCAL = 1)
-
-  tty.c_lflag &= ~ICANON;
-  tty.c_lflag &= ~ECHO; // Disable echo
-  tty.c_lflag &= ~ECHOE; // Disable erasure
-  tty.c_lflag &= ~ECHONL; // Disable new-line echo
-  tty.c_lflag &= ~ISIG; // Disable interpretation of INTR, QUIT and SUSP
-  tty.c_iflag &= ~(IXON | IXOFF | IXANY); // Turn off s/w flow ctrl
-  tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL); // Disable any special handling of received bytes
-
-  tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
-  tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
-
-  tty.c_cc[VTIME] = 0;   // Non blocking
-  tty.c_cc[VMIN] = 0;
-
-  // start at Baud 1200
-  cfsetispeed(&tty, B1200);
-  cfsetospeed(&tty, B1200);
-
-  // Save tty settings, also checking for error
-  if (tcsetattr(serial_port, TCSANOW, &tty) != 0) {
-      printf("Error %i from tcsetattr: %s\n", errno, strerror(errno));
-      return 1;
-  }
   printf("Waiting for controller ISP...\n");
 
   uint8_t ch = 0x80;
   uint8_t ch1;
   int count=0;
   while(1) {
-    write(serial_port,&ch,1); usleep(10000000L/1200);
-    if(read(serial_port, &ch1, 1)>0)
+    serial_write(serial_port,&ch,1); usleep(10000000L/1200);
+    if(serial_read(serial_port, &ch1, 1)>0)
         if(ch1==0x69) break;
   }
   usleep(1000);
-  tcflush(serial_port, TCOFLUSH);
+  flush_serial(serial_port);
 
   ch1=25;
-  while(--ch1) write(serial_port,&ch,1);
-  ch=0x5a; write(serial_port,&ch,1);
-  ch=0x69; write(serial_port,&ch,1);
+  while(--ch1) serial_write(serial_port,&ch,1);
+  ch=0x5a; serial_write(serial_port,&ch,1);
+  ch=0x69; serial_write(serial_port,&ch,1);
 
   while(1) {
-    if(read(serial_port, &ch1, 1)>0)
+    if(serial_read(serial_port, &ch1, 1)>0)
         if(ch1==0x05) break;
   }
   if(quiet < 2) printf("Controller ISP responded...\n");
   if(quiet < 2) printf("Negotiating Baud Rate...\n");
 
-   const uint8_t *header = get_header(CMD_0, baud_9600,0);write(serial_port,header,8); 
-   // wait for 500ms
+   const uint8_t *header = get_header(CMD_0, baud_9600,0);serial_write(serial_port,header,8); 
 
    usleep(500000);
    usleep(200000);
 
   if(baud_9600){
-  cfsetispeed(&tty, B9600);
-  cfsetospeed(&tty, B9600);
-
-  // Save tty settings, also checking for error
-  if (tcsetattr(serial_port, TCSANOW, &tty) != 0) {
-      printf("Error %i from tcsetattr: %s\n", errno, strerror(errno));
-      return 1;
-  }
+     switch_to_baud_9600(serial_port);
    }
   if(quiet < 2) printf("Begin Programming...\n");
-   header = get_header(CMD_1, 0,0);write(serial_port,header,8);
+   header = get_header(CMD_1, 0,0);serial_write(serial_port,header,8);
 
   while(1) {
-    if(read(serial_port, &ch1, 1)>0)
+    if(serial_read(serial_port, &ch1, 1)>0)
         if(ch1==0x00) break;
   }
-  // can change to new baud here
-  //
 
   if(quiet < 2) printf("Progress (# = 64 bytes): ");
   uint16_t cur_addr=0;
   while(send_64(serial_port, buffer,&cur_addr,len)){
     if(quiet < 3) {printf("#");fflush(stdout);}
-    while(1) { if(read(serial_port, &ch1, 1)>0) if(ch1==0x00) break; }
+    while(1) { if(serial_read(serial_port, &ch1, 1)>0) if(ch1==0x00) break; }
   }
   if(quiet < 3) printf("\n");
   if(quiet < 2) printf("Programming complete...\nResetting the controller...\n");
-  ch=0xff; write(serial_port,&ch,1); write(serial_port,&ch,1);
+  ch=0xff; serial_write(serial_port,&ch,1); serial_write(serial_port,&ch,1);
 
-  close(serial_port);
+  close_serial(serial_port);
+
   return 0; // success
 };
 
+int send_64(HANDLE serial_port, uint8_t *buffer, uint16_t *cur_addr, uint16_t buffer_len){
 
-int send_64(int serial_port, uint8_t *buffer, uint16_t *cur_addr, uint16_t buffer_len){
    uint8_t send_buf[64] ;
    int ret_status;
    if(((*cur_addr) + 64) > buffer_len){
@@ -300,8 +251,8 @@ int send_64(int serial_port, uint8_t *buffer, uint16_t *cur_addr, uint16_t buffe
    for(int i=0;i<64;i++) sum += send_buf[i];
 
    const uint8_t *header = get_header(CMD_2, (*cur_addr),sum);
-   write(serial_port,header,8);
-   write(serial_port, send_buf, 64);
+   serial_write(serial_port,header,8);
+   serial_write(serial_port, send_buf, 64);
 
    (*cur_addr) +=64;
    return ret_status;
