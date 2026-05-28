@@ -88,8 +88,8 @@ void usage(const char *argv0)
 
 int main(int argc, char **argv) {
   int baud_9600 = 0;
-  char *binfile = "t.bin";
-  char *serfile = "/dev/ttyUSB0";
+  char *binfile = strdup("t.bin");
+  char *serfile = strdup("/dev/ttyUSB0");
   int quiet =0;
 
 
@@ -168,8 +168,6 @@ if(!quiet) banner();
 	memset(buffer,0xFF,0x4000);
 	read(fd,buffer,0x4000);
   	close(fd);
-
-
 
   HANDLE serial_port = open_serial_port(serfile); 
   if(IS_INVALID_HANDLE(serial_port)) {printf("Error: Could not open %s\n",serfile); free(serfile); exit(-1); }
