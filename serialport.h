@@ -15,9 +15,11 @@
     #include <windows.h>
     #define IS_INVALID_HANDLE(x) (x==INVALID_HANDLE_VALUE)
 #else
+    #include <errno.h>
     #include <termios.h>
     #define IS_INVALID_HANDLE(x) (x<0)
     #define HANDLE int
+    #define DWORD  long
 #endif
 
 HANDLE open_serial_port(const char *portname);
